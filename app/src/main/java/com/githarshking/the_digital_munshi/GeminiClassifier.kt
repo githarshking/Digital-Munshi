@@ -1,13 +1,13 @@
 package com.githarshking.the_digital_munshi
 
 import android.content.Context
+import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-// Define your prediction result
 data class TransactionPrediction(
     val category: String,
     val type: String,
@@ -15,14 +15,14 @@ data class TransactionPrediction(
     val confidence: Double
 )
 
-// UPDATED: Accepts Context to read User Preferences
 class GeminiClassifier(private val context: Context) {
 
-    // Reads from BuildConfig
     private val apiKey = BuildConfig.GEMINI_API_KEY
 
+    // FIX 1: Use the specific version "-001".
+    // The alias "gemini-1.5-flash" sometimes fails on older SDKs.
     private val model = GenerativeModel(
-        modelName = "gemini-1.5-flash",
+        modelName = "gemini-2.5-flash",
         apiKey = apiKey,
         generationConfig = generationConfig {
             responseMimeType = "application/json"
@@ -32,7 +32,6 @@ class GeminiClassifier(private val context: Context) {
     suspend fun categorizeTransaction(smsBody: String, sender: String): TransactionPrediction {
         return withContext(Dispatchers.IO) {
 
-            // 1. GET USER CONTEXT
             val (name, occupation, desc) = UserPreferences.getUserDetails(context)
 
             val prompt = """
@@ -42,9 +41,9 @@ class GeminiClassifier(private val context: Context) {
                 Analyze this SMS: "$smsBody" from Sender: "$sender".
                 
                 Task:
-                1. Identify 'category' based on their job. (e.g., If they are a driver, 'Fuel' is a Business Expense).
+                1. Identify 'category' based on their job.
                 2. Identify 'type' (Income/Expense).
-                3. Provide 'reasoning' (max 10 words) mentioning their job context if relevant.
+                3. Provide 'reasoning' (max 10 words).
                 4. Give 'confidence' (0.0 to 1.0).
                 
                 Output JSON Schema:
@@ -53,7 +52,17 @@ class GeminiClassifier(private val context: Context) {
 
             try {
                 val response = model.generateContent(prompt)
-                val jsonString = response.text ?: "{}"
+                var jsonString = response.text ?: "{}"
+
+                // FIX 2: Clean the Markdown Backticks
+                // Gemini often sends ```json { ... } ``` which crashes the JSON parser
+                if (jsonString.contains("`")) {
+                    jsonString = jsonString.replace("```json", "")
+                        .replace("```", "")
+                        .trim()
+                }
+
+                Log.d("GeminiClassifier", "Cleaned JSON: $jsonString")
 
                 val jsonObject = JSONObject(jsonString)
 
@@ -64,8 +73,14 @@ class GeminiClassifier(private val context: Context) {
                     confidence = jsonObject.optDouble("confidence", 0.0)
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
-                TransactionPrediction("Uncategorized", "EXPENSE", "AI Error", 0.0)
+                Log.e("GeminiClassifier", "Critical AI Failure", e)
+                // Return a safe object so the app doesn't crash
+                TransactionPrediction(
+                    category = "Uncategorized",
+                    type = "EXPENSE",
+                    reasoning = "AI Error: ${e.message}",
+                    confidence = 0.0
+                )
             }
         }
     }

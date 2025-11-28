@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -18,17 +19,34 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Read the key from local.properties
-        val properties = Properties() // removed 'java.util.'
-        val localPropertiesFile = project.rootProject.file("local.properties")
-        if (localPropertiesFile.exists()) {
-            properties.load(FileInputStream(localPropertiesFile)) // removed 'java.io.'
-        }
-        val geminiKey = properties.getProperty("geminiApiKey") ?: ""
+        // --- DEBUGGING LOGIC START ---
+        val rootFile = project.rootProject.file("local.properties")
+        val appFile = project.file("local.properties")
+        val properties = Properties()
+        var geminiKey = ""
 
-        // Inject it into the app as a BuildConfig variable
+        println("🔍 DEBUGGING API KEY:")
+        if (rootFile.exists()) {
+            println("   ✅ Found local.properties in ROOT folder: ${rootFile.absolutePath}")
+            properties.load(FileInputStream(rootFile))
+            geminiKey = properties.getProperty("geminiApiKey") ?: ""
+        } else if (appFile.exists()) {
+            println("   ⚠️ Found local.properties in APP folder (Wrong spot, but reading anyway): ${appFile.absolutePath}")
+            properties.load(FileInputStream(appFile))
+            geminiKey = properties.getProperty("geminiApiKey") ?: ""
+        } else {
+            println("   ❌ ERROR: Could not find local.properties anywhere!")
+        }
+
+        if (geminiKey.isEmpty()) {
+            println("   ❌ ERROR: Key 'geminiApiKey' is MISSING or EMPTY inside the file.")
+        } else {
+            println("   ✅ SUCCESS: Key found! Length: ${geminiKey.length}")
+        }
+        println("--------------------------------------------------")
+        // --- DEBUGGING LOGIC END ---
+
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
-        // --- CORRECTED CODE ENDS HERE ---
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,6 +67,7 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -74,7 +93,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(libs.accompanist.permissions)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.compose.material.icons.extended)
 
     // Room, Coroutines, and ViewModel using version catalog
     implementation(libs.androidx.room.runtime)
@@ -84,6 +102,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.zxing.core)
 
-    implementation(libs.google.generativeai)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+
     implementation(libs.androidx.work.runtime.ktx)
 }
