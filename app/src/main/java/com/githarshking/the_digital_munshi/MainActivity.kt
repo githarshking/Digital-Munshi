@@ -1,4 +1,4 @@
-package com.githarshking.the_digital_munshi // Your package name
+package com.githarshking.the_digital_munshi
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,8 +20,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.githarshking.the_digital_munshi.data.MunshiDatabase
-import com.githarshking.the_digital_munshi.data.Transaction
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.githarshking.the_digital_munshi.data.* // Import all from data
+import com.githarshking.the_digital_munshi.ui.ReportScreen
 import com.githarshking.the_digital_munshi.ui.theme.DigitalMunshiTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -28,65 +34,68 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-// Make sure you have these imports for permissions
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             DigitalMunshiTheme {
-                // This is the new entry point
                 MunshiApp()
             }
         }
     }
 }
 
-/**
- * NEW: This composable is now our permission checker.
- */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MunshiApp() {
-    // --- Permission Handling ---
     val smsPermissionState = rememberPermissionState(
         android.Manifest.permission.READ_SMS
     )
 
     if (smsPermissionState.status.isGranted) {
-        // Permission is GRANTED: Show the main app
-        MainAppScreen()
+        AppNavigation()
     } else {
-        // Permission is NOT GRANTED: Show a request screen
-        PermissionRequestScreen(
-            onRequestPermission = {
-                smsPermissionState.launchPermissionRequest()
-            }
-        )
+        PermissionRequestScreen {
+            smsPermissionState.launchPermissionRequest()
+        }
     }
 }
 
-/**
- * NEW: A screen to show users who haven't granted the permission.
- */
+@Composable
+fun AppNavigation() {
+    val navController = rememberNavController()
+    val context = LocalContext.current
+    val dao = remember { MunshiDatabase.getDatabase(context).transactionDao() }
+    val reportViewModelFactory = ReportViewModelFactory(dao)
+
+    NavHost(navController = navController, startDestination = "home") {
+        composable("home") {
+            MainAppScreen(
+                dao = dao,
+                onNavigateToReport = { navController.navigate("report") }
+            )
+        }
+        composable("report") {
+            val reportViewModel: ReportViewModel = viewModel(factory = reportViewModelFactory)
+            ReportScreen(
+                viewModel = reportViewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+    }
+}
+
 @Composable
 fun PermissionRequestScreen(onRequestPermission: () -> Unit) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Permission Needed",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
+        Text("Permission Needed", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "To automatically read bank and UPI transactions, " +
-                    "this app needs permission to read your SMS messages.",
+            "To automatically read bank and UPI transactions, this app needs permission to read your SMS messages.",
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(16.dp))
@@ -96,42 +105,31 @@ fun PermissionRequestScreen(onRequestPermission: () -> Unit) {
     }
 }
 
-
-/**
- * RENAMED: This is your *original* MunshiApp() function,
- * now renamed to "MainAppScreen" and with new logic for editing.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainAppScreen() {
-    // --- Database & State Setup ---
-    val context = LocalContext.current
-    val dao = remember { MunshiDatabase.getDatabase(context).transactionDao() }
+fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
     val transactions by dao.getAllTransactions().collectAsState(initial = emptyList())
-
-    // --- State for Dialogs ---
     var showAddDialog by remember { mutableStateOf(false) }
-
-    // NEW: This state holds the transaction we want to edit.
-    // null = adding a new one
-    // not-null = editing an existing one
     var transactionToEdit by remember { mutableStateOf<Transaction?>(null) }
 
-    // --- UI Structure ---
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Digital Munshi") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
-                )
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                actions = {
+                    IconButton(onClick = onNavigateToReport) {
+                        Icon(Icons.Filled.Assessment, contentDescription = "View Report")
+                    }
+                }
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
-                // UPDATED: When we click "+", we set transactionToEdit to null
-                // to signal we are "adding" a new item.
                 transactionToEdit = null
                 showAddDialog = true
             }) {
@@ -139,30 +137,21 @@ fun MainAppScreen() {
             }
         }
     ) { innerPadding ->
-
-        // UPDATED: We pass the onEdit lambda to our home screen
         HomeScreenBody(
             modifier = Modifier.padding(innerPadding),
             transactions = transactions,
             onEdit = { transaction ->
-                // When a list item is clicked, this lambda is called.
-                // We set the transaction to edit...
                 transactionToEdit = transaction
-                // ...and show the dialog.
                 showAddDialog = true
             }
         )
 
-        // --- Dialog Logic ---
         if (showAddDialog) {
             AddTransactionDialog(
-                // UPDATED: We pass the transaction-to-edit to the dialog
                 transactionToEdit = transactionToEdit,
                 onDismiss = { showAddDialog = false },
                 onConfirm = { transaction ->
                     CoroutineScope(Dispatchers.IO).launch {
-                        // This one line handles BOTH adding and updating,
-                        // thanks to our database's OnConflictStrategy.REPLACE
                         dao.insertTransaction(transaction)
                     }
                     showAddDialog = false
@@ -172,70 +161,34 @@ fun MainAppScreen() {
     }
 }
 
-/**
- * UPDATED: This now takes an 'onEdit' function.
- */
 @Composable
-fun HomeScreenBody(
-    modifier: Modifier = Modifier,
-    transactions: List<Transaction>,
-    onEdit: (Transaction) -> Unit // NEW parameter
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+fun HomeScreenBody(modifier: Modifier = Modifier, transactions: List<Transaction>, onEdit: (Transaction) -> Unit) {
+    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         if (transactions.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No transactions yet. Tap '+' to add one!",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Text("No transactions yet. Tap '+' to add one!", style = MaterialTheme.typography.titleMedium)
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(transactions) { transaction ->
-                    // UPDATED: We pass the onEdit lambda to the item
-                    TransactionItem(
-                        transaction = transaction,
-                        onClick = { onEdit(transaction) } // NEW
-                    )
+                    TransactionItem(transaction = transaction, onClick = { onEdit(transaction) })
                 }
             }
         }
     }
 }
 
-/**
- * UPDATED: This now takes an 'onClick' function and is clickable.
- */
 @Composable
-fun TransactionItem(transaction: Transaction, onClick: () -> Unit) { // NEW parameter
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }, // NEW: This makes the card clickable
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+fun TransactionItem(transaction: Transaction, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = transaction.category,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = transaction.note ?: "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
+                Text(text = transaction.category, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(text = transaction.note ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
             Text(
                 text = "₹${"%.2f".format(transaction.amount)}",
@@ -248,97 +201,61 @@ fun TransactionItem(transaction: Transaction, onClick: () -> Unit) { // NEW para
     }
 }
 
-/**
- * HEAVILY UPDATED: This dialog now handles both "Add" and "Edit".
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTransactionDialog(
-    transactionToEdit: Transaction?, // NEW: The transaction to edit (or null)
+    transactionToEdit: Transaction?,
     onDismiss: () -> Unit,
     onConfirm: (Transaction) -> Unit
 ) {
-    // UPDATED: All state is now "remembered" based on
-    // whether we are adding or editing.
     var amount by remember { mutableStateOf(transactionToEdit?.amount?.toString() ?: "") }
     var note by remember { mutableStateOf(transactionToEdit?.note ?: "") }
     var isExpense by remember { mutableStateOf(transactionToEdit?.type == "EXPENSE" || transactionToEdit == null) }
     var selectedCategory by remember { mutableStateOf(transactionToEdit?.category ?: "Groceries") }
 
-    // UPDATED: Added the new default SMS category to the list
     val categories = listOf("Groceries", "Fuel", "Salary", "Sales", "Rent", "Other", "SMS / Uncategorized")
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        // UPDATED: Title is now dynamic
         title = { Text(if (transactionToEdit == null) "Add Transaction" else "Edit Transaction") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Amount (₹)") },
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Note (Optional)") }
-                )
+                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount (₹)") })
+                OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("Note (Optional)") })
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(
-                        selected = isExpense,
-                        onClick = { isExpense = true }
-                    )
+                    RadioButton(selected = isExpense, onClick = { isExpense = true })
                     Text("Expense", modifier = Modifier.padding(end = 16.dp))
-                    RadioButton(
-                        selected = !isExpense,
-                        onClick = { isExpense = false }
-                    )
+                    RadioButton(selected = !isExpense, onClick = { isExpense = false })
                     Text("Income")
                 }
-                OutlinedTextField(
-                    value = selectedCategory,
-                    onValueChange = { selectedCategory = it },
-                    label = { Text("Category") }
-                )
+                // This could be a dropdown in a real app
+                OutlinedTextField(value = selectedCategory, onValueChange = { selectedCategory = it }, label = { Text("Category") })
             }
         },
         confirmButton = {
             Button(onClick = {
-                // UPDATED: When confirming, we create a Transaction object,
-                // but we make sure to keep the original ID, date, and source
-                // if we are editing.
                 val newTransaction = Transaction(
-                    id = transactionToEdit?.id ?: 0L, // 0L for new, existing ID for edit
+                    id = transactionToEdit?.id ?: 0L,
                     amount = amount.toDoubleOrNull() ?: 0.0,
                     type = if (isExpense) "EXPENSE" else "INCOME",
-                    date = transactionToEdit?.date ?: System.currentTimeMillis(), // Keep original date
+                    date = transactionToEdit?.date ?: System.currentTimeMillis(),
                     category = selectedCategory.ifEmpty { "Other" },
                     note = note,
-                    source = transactionToEdit?.source ?: "MANUAL" // Keep original source
+                    source = transactionToEdit?.source ?: "MANUAL"
                 )
                 onConfirm(newTransaction)
-            }) {
-                Text("Save")
-            }
+            }) { Text("Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
 
-
-/**
- * UPDATED: The preview now shows the "MainAppScreen"
- * so you don't see the permission request in your preview window.
- */
 @Preview(showBackground = true)
 @Composable
 fun DefaultPreview() {
     DigitalMunshiTheme {
-        MainAppScreen() // Changed from MunshiApp()
+        PermissionRequestScreen {}
     }
 }
