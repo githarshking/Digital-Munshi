@@ -1,14 +1,20 @@
 package com.githarshking.the_digital_munshi.data
 
+import android.content.Context
+import android.os.Build
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.githarshking.the_digital_munshi.QrCodeUtils
 import com.githarshking.the_digital_munshi.SecurityUtils
+import com.githarshking.the_digital_munshi.UserPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -35,60 +41,102 @@ data class RiskProfile(
 data class SignedReport(
     val signature: String = "",
     val publicKey: String = "",
+    val payloadJson: String = "", // Store the full JSON here
     val timestamp: Long = 0L,
-    val isSigned: Boolean = false
+    val isSigned: Boolean = false,
+    val error: String? = null // New Error Field
 )
 
 class ReportViewModel(dao: TransactionDao) : ViewModel() {
 
     private val allTransactions = dao.getAllTransactions()
 
-    // State for the currently selected month filter (null = All Time)
     private val _selectedMonth = MutableStateFlow<String?>(null)
     val selectedMonth = _selectedMonth.asStateFlow()
 
-    // List of available months for the dropdown
     val availableMonths: StateFlow<List<String>> = allTransactions.map { list ->
         val fmt = SimpleDateFormat("MMM yyyy", Locale.US)
-        list.map { fmt.format(Date(it.date)) }.distinct().sorted() // Ideally sort by date object
+        list.map { fmt.format(Date(it.date)) }.distinct().sorted()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
 
-    // We combine the raw transactions with the filter selection
     val riskProfile: StateFlow<RiskProfile> = combine(allTransactions, _selectedMonth) { transactions, monthFilter ->
         calculateRiskMetrics(transactions, monthFilter)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), RiskProfile())
 
-    // Helper to update filter
     fun setMonthFilter(month: String?) {
         _selectedMonth.value = month
     }
 
-    // ... Signed Report Logic (Same as before) ...
     private val _signedReport = MutableStateFlow(SignedReport())
     val signedReport = _signedReport.asStateFlow()
 
-    fun generateLegalSignature(profile: RiskProfile) {
-        // (Same implementation as previous step)
+    /**
+     * Generates the Section 65B Compliant, Bank-Grade QR Payload.
+     * Now requires Context to fetch Real Identity.
+     */
+    fun generateLegalSignature(context: Context) {
         viewModelScope.launch {
             try {
-                val payload = """
-                    DIGITAL_MUNSHI_REPORT_V3
-                    INCOME:${profile.totalIncome}
-                    MARGIN:${profile.profitMargin}
-                    STABILITY:${profile.stabilityScore}
-                    TIMESTAMP:${System.currentTimeMillis()}
-                """.trimIndent()
-                val signature = SecurityUtils.signData(payload)
+                // 1. FIX RACE CONDITION: Get the latest calculation explicitly
+                val profile = riskProfile.first()
+
+                // 2. SAFETY CHECK: Prevent "Ghost User" reports
+                if (profile.totalIncome <= 0) {
+                    _signedReport.value = SignedReport(error = "Insufficient Data: Cannot certify a report with zero income.")
+                    return@launch
+                }
+
+                // 3. FETCH IDENTITY: Get real name from preferences
+                val (name, occupation, _) = UserPreferences.getUserDetails(context)
+                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+                // 4. CREATE PAYLOAD: Generate the strict JSON Structure
+                // We sign a simplified string for the signature, but distribute the full JSON
+                val signaturePayload = "ID:$name|INC:${profile.totalIncome}|CV:${profile.stabilityScore}|TS:${System.currentTimeMillis()}"
+
+                // 5. SIGN: Hardware backed signature
+                val signature = SecurityUtils.signData(signaturePayload)
                 val pubKey = SecurityUtils.getPublicKey()
-                _signedReport.value = SignedReport(signature, pubKey, System.currentTimeMillis(), true)
-            } catch (e: Exception) { e.printStackTrace() }
+
+                // 6. COMPILE: Create the final QR JSON
+                val finalJson = QrCodeUtils.createCreditProfileJson(
+                    userName = name,
+                    userOccupation = occupation,
+                    deviceName = deviceName,
+                    income = profile.totalIncome,
+                    savings = profile.netSavings,
+                    stabilityScore = profile.stabilityScore,
+                    stabilityLabel = profile.stabilityLabel,
+                    profitMargin = profile.profitMargin,
+                    signature = signature,
+                    publicKey = pubKey
+                )
+
+                // 7. UPDATE STATE
+                _signedReport.value = SignedReport(
+                    signature = signature,
+                    publicKey = pubKey,
+                    payloadJson = finalJson, // Store this for the QR generator
+                    timestamp = System.currentTimeMillis(),
+                    isSigned = true,
+                    error = null
+                )
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _signedReport.value = SignedReport(error = "Signing Failed: ${e.message}")
+            }
         }
     }
 
+    fun clearError() {
+        _signedReport.value = _signedReport.value.copy(error = null)
+    }
+
+    // ... calculateRiskMetrics logic remains identical to previous step ...
     private fun calculateRiskMetrics(allTxns: List<Transaction>, monthFilter: String?): RiskProfile {
         if (allTxns.isEmpty()) return RiskProfile()
 
-        // 1. Filter Transactions based on selection
         val fmt = SimpleDateFormat("MMM yyyy", Locale.US)
         val filteredTxns = if (monthFilter == null) {
             allTxns
@@ -96,7 +144,6 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
             allTxns.filter { fmt.format(Date(it.date)) == monthFilter }
         }
 
-        // 2. Calculate Totals (On Filtered Data)
         val incomeList = filteredTxns.filter { it.type == "INCOME" }
         val totalIncome = incomeList.sumOf { it.amount }
         val totalExpense = filteredTxns.filter { it.type == "EXPENSE" }.sumOf { it.amount }
@@ -106,8 +153,6 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
         val verifiedIncome = incomeList.filter { it.isVerified }.sumOf { it.amount }
         val verifiedRatio = if (totalIncome > 0) ((verifiedIncome / totalIncome) * 100).toInt() else 0
 
-        // 3. Stability & Waveform (ALWAYS use All Data)
-        // Lenders want to see the history even if you are looking at one month's report
         val allIncomeList = allTxns.filter { it.type == "INCOME" }
         val monthlyIncomeMap = allIncomeList
             .groupBy { fmt.format(Date(it.date)) }
@@ -115,12 +160,9 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
 
         val monthlyIncomes = monthlyIncomeMap.values.toList()
 
-        // Chart Data (Sort is tricky with strings, for hackathon MVP assume insertion order or basic sort)
-        // To sort correctly: Parse string back to date
         val chartData = allIncomeList
             .groupBy { fmt.format(Date(it.date)) }
             .map { (m, list) -> m to list.sumOf { it.amount }.toFloat() }
-        // Simple optimization for demo: Don't strictly sort complexly if not needed
 
         var cv = 0.0
         var label = "Insufficient Data"
@@ -133,7 +175,7 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
             if (mean > 0) cv = (stdDev / mean) * 100
 
             label = when {
-                monthlyIncomes.size < 2 -> "Collecting Data" // If only 1 month data exists
+                monthlyIncomes.size < 2 -> "Collecting Data"
                 cv < 20.0 -> "High Stability"
                 cv < 50.0 -> "Medium Stability"
                 else -> "Volatile"
@@ -141,10 +183,7 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
             peaks = monthlyIncomeMap.filter { it.value > (mean * 1.5) }.keys.toList()
         }
 
-        // If a filter is active, we might want to hide Stability label (as it applies to all time)
-        // OR we keep it to show the user's overall standing. Let's keep it.
-
-        val topSources = incomeList // Uses filtered list for ecosystem
+        val topSources = incomeList
             .groupBy { it.counterparty }
             .map { (source, list) -> source to list.sumOf { it.amount } }
             .sortedByDescending { it.second }
@@ -165,7 +204,7 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
         )
     }
 }
-// ... Factory ...
+
 class ReportViewModelFactory(private val dao: TransactionDao) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ReportViewModel::class.java)) {
