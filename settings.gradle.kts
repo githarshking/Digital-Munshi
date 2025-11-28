@@ -19,6 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "the_digital_munshi"
+rootProject.name = "The-Digital-Munshi"
 include(":app")
- 

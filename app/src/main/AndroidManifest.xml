@@ -10,12 +10,12 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.The_digital_munshi">
+        android:theme="@style/Theme.TheDigitalMunshi">
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.The_digital_munshi">
+            android:theme="@style/Theme.TheDigitalMunshi">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
