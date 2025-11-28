@@ -1,46 +1,79 @@
 package com.githarshking.the_digital_munshi.ui
 
+import android.os.Build
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.githarshking.the_digital_munshi.QrCodeUtils
 import com.githarshking.the_digital_munshi.data.ReportViewModel
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportScreen(
     viewModel: ReportViewModel,
-    onNavigateBack: () -> Unit // Function to go back
+    onNavigateBack: () -> Unit
 ) {
-    // Collect the calculated values from the ViewModel
-    val totalIncome by viewModel.totalIncome.collectAsState()
-    val totalExpense by viewModel.totalExpense.collectAsState()
-    val netSavings by viewModel.netSavings.collectAsState()
-    val expenseBreakdown by viewModel.expenseBreakdown.collectAsState()
+    val riskProfile by viewModel.riskProfile.collectAsState()
+    val signedReport by viewModel.signedReport.collectAsState()
+
+    // Mock User ID
+    val userId = remember { "USR-${UUID.randomUUID().toString().take(8).uppercase()}" }
+
+    // State for QR Dialog
+    var showQrDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Kamayi Patra (Report)") },
+                title = { Text("Kamayi Patra", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    // ONLY Show Share button if the report is Signed
+                    if (signedReport.isSigned) {
+                        IconButton(onClick = { showQrDialog = true }) {
+                            Icon(Icons.Default.QrCode, contentDescription = "Share Report")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = Color(0xFF1A237E),
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White // White Share Icon
                 )
             )
         }
@@ -49,105 +82,253 @@ fun ReportScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .background(Color(0xFFF5F7FA))
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
 
-            // --- Totals Section ---
+            // --- HEADER ZONE ---
             item {
-                Text(
-                    "Monthly Summary",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                Column(Modifier.fillMaxWidth()) {
+                    Text("GENERATED FOR", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Text(userId, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
+                    if (signedReport.isSigned) {
+                        Text("REPORT ID: ${signedReport.signature.take(16)}...", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
+                    } else {
+                        Text("STATUS: DRAFT (Unsigned)", style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF6C00))
+                    }
+                }
             }
 
+            // --- ZONE A: KPIs ---
             item {
-                SummaryCard(
-                    totalIncome = totalIncome,
-                    totalExpense = totalExpense,
-                    netSavings = netSavings
-                )
-            }
-
-            // --- Breakdown Section ---
-            item {
-                Text(
-                    "Expense Breakdown",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 16.dp)
-                )
-            }
-
-            if (expenseBreakdown.isEmpty()) {
-                item {
-                    Text(
-                        "No expenses logged yet.",
-                        style = MaterialTheme.typography.bodyMedium
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KpiCard(
+                        modifier = Modifier.weight(1f),
+                        title = "STABILITY SCORE",
+                        value = riskProfile.stabilityLabel,
+                        subtext = "CV Score: ${"%.1f".format(riskProfile.stabilityScore)}%",
+                        isGood = riskProfile.stabilityScore < 20 || riskProfile.stabilityLabel.contains("Collecting")
+                    )
+                    KpiCard(
+                        modifier = Modifier.weight(1f),
+                        title = "BUSINESS HEALTH",
+                        value = "${riskProfile.profitMargin}% Margin",
+                        subtext = "Expense Ratio: ${100 - riskProfile.profitMargin}%",
+                        isGood = riskProfile.profitMargin > 20
                     )
                 }
-            } else {
-                // Display a row for each category
-                items(expenseBreakdown.toList()) { (category, amount) ->
-                    CategoryRow(category = category, amount = amount)
+            }
+
+            // --- ZONE B: CHARTS ---
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Seasonality Waveform", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(16.dp))
+                        if (riskProfile.monthlyTrend.isNotEmpty()) {
+                            SeasonalityChart(data = riskProfile.monthlyTrend, modifier = Modifier.fillMaxWidth().height(150.dp))
+                        } else {
+                            Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                Text("Insufficient data", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- ZONE C: ECOSYSTEM ---
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Revenue Sources", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(12.dp))
+                        if (riskProfile.topSources.isEmpty()) {
+                            Text("No verified sources.", style = MaterialTheme.typography.bodySmall)
+                        } else {
+                            riskProfile.topSources.forEach { (source, amount) ->
+                                EcosystemRow(source = source, amount = amount, totalIncome = riskProfile.totalIncome)
+                                Spacer(Modifier.height(12.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- LEGAL FOOTER ---
+            item {
+                if (!signedReport.isSigned) {
+                    CertificationSection(
+                        deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
+                        onSignClicked = { viewModel.generateLegalSignature(riskProfile) }
+                    )
+                } else {
+                    DigitalSealCard(signature = signedReport.signature)
+                }
+            }
+
+            item { Spacer(Modifier.height(30.dp)) }
+        }
+
+        // --- QR CODE DIALOG ---
+        if (showQrDialog) {
+            QrShareDialog(
+                userId = userId,
+                riskProfile = riskProfile,
+                signedReport = signedReport,
+                onDismiss = { showQrDialog = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun QrShareDialog(
+    userId: String,
+    riskProfile: com.githarshking.the_digital_munshi.data.RiskProfile,
+    signedReport: com.githarshking.the_digital_munshi.data.SignedReport,
+    onDismiss: () -> Unit
+) {
+    // Generate the Payload String
+    val payload = remember {
+        QrCodeUtils.createSharePayload(
+            userId = userId,
+            income = riskProfile.totalIncome,
+            score = riskProfile.stabilityScore,
+            signature = signedReport.signature,
+            publicKey = signedReport.publicKey
+        )
+    }
+
+    // Generate the Bitmap
+    val qrBitmap = remember(payload) {
+        QrCodeUtils.generateQrCode(payload)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Lender Scan Code", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Show this code to the loan officer to instantly verify your data.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, color = Color.Gray)
+
+                Spacer(Modifier.height(24.dp))
+
+                if (qrBitmap != null) {
+                    Image(
+                        bitmap = qrBitmap,
+                        contentDescription = "QR Code",
+                        modifier = Modifier.size(200.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Text("Error generating QR", color = Color.Red)
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E))) {
+                    Text("Close")
                 }
             }
         }
     }
 }
 
+// --- HELPERS (KpiCard, SeasonalityChart, etc. kept same as previous step) ---
+
 @Composable
-fun SummaryCard(totalIncome: Double, totalExpense: Double, netSavings: Double) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SummaryRow("Total Income", totalIncome, Color(0xFF008000))
-            SummaryRow("Total Expense", totalExpense, Color.Red)
-            Divider(modifier = Modifier.padding(vertical = 4.dp))
-            SummaryRow("Net Savings", netSavings, Color.Black)
+fun KpiCard(modifier: Modifier, title: String, value: String, subtext: String, isGood: Boolean) {
+    val color = if (isGood) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+    val textColor = if (isGood) Color(0xFF2E7D32) else Color(0xFFC62828)
+
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = color), elevation = CardDefaults.cardElevation(0.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
+            Spacer(Modifier.height(8.dp))
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = textColor)
+            Spacer(Modifier.height(4.dp))
+            Text(subtext, style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = 0.8f))
         }
     }
 }
 
 @Composable
-fun SummaryRow(label: String, amount: Double, color: Color) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-        Text(
-            "₹${"%.2f".format(amount)}",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            color = color
-        )
+fun SeasonalityChart(data: List<Pair<String, Float>>, modifier: Modifier = Modifier) {
+    val points = data.map { it.second }
+    val max = points.maxOrNull() ?: 1f
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val stepX = width / (points.size.coerceAtLeast(1))
+        val path = Path()
+
+        points.forEachIndexed { index, value ->
+            val x = index * stepX + (stepX / 2)
+            val y = height - ((value / max) * height)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            drawCircle(color = Color(0xFF3F51B5), radius = 6.dp.toPx(), center = Offset(x, y))
+        }
+        drawPath(path = path, color = Color(0xFF3F51B5), style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+        path.lineTo(width, height)
+        path.lineTo(0f, height)
+        path.close()
+        drawPath(path = path, brush = Brush.verticalGradient(colors = listOf(Color(0xFF3F51B5).copy(alpha = 0.2f), Color.Transparent)))
     }
 }
 
 @Composable
-fun CategoryRow(category: String, amount: Double) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(category, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                "₹${"%.2f".format(amount)}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.Red
-            )
+fun EcosystemRow(source: String, amount: Double, totalIncome: Double) {
+    val percentage = (amount / totalIncome).toFloat()
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(source, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text("₹${amount.toInt()}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFFEEEEEE))) {
+            Box(Modifier.fillMaxWidth(percentage).fillMaxHeight().background(Color(0xFF2196F3)))
+        }
+        Text("${(percentage * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+fun CertificationSection(deviceName: String, onSignClicked: () -> Unit) {
+    var isChecked by remember { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFC107))) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Legal Certification (Section 65B)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFA000))
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.Top) {
+                Checkbox(checked = isChecked, onCheckedChange = { isChecked = it })
+                Text("I certify that this report was generated from electronic records residing on my personal device ($deviceName), and is a true representation of my financial transactions.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+            }
+            Button(onClick = onSignClicked, enabled = isChecked, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000))) {
+                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Sign & Lock Report")
+            }
+        }
+    }
+}
+
+@Composable
+fun DigitalSealCard(signature: String) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50))) {
+        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.Verified, contentDescription = "Verified", tint = Color(0xFF4CAF50), modifier = Modifier.size(48.dp))
+            Text("DIGITALLY SIGNED", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+            Spacer(Modifier.height(8.dp))
+            Text(signature.take(20) + "...", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            Text("Tamper-proof record.", style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
         }
     }
 }

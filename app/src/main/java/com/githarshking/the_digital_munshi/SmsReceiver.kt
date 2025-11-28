@@ -10,11 +10,11 @@ import com.githarshking.the_digital_munshi.data.Transaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.text.Normalizer // IMPORT THIS! The magic cleaner.
+import java.text.Normalizer
+import java.util.UUID
 
 class SmsReceiver : BroadcastReceiver() {
 
-    // Updated Regex to handle "INR 270.00" and "Rs 11.00"
     private val amountRegex = "(?i)(?:Rs\\.?|INR)\\s*([0-9,]+(?:\\.[0-9]+)?)".toRegex()
 
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -26,43 +26,31 @@ class SmsReceiver : BroadcastReceiver() {
             val rawBody = sms.messageBody ?: ""
             val sender = sms.originatingAddress ?: "Unknown"
 
-            // --- STEP 1: THE MAGIC CLEANER (Normalization) ---
-            // This converts "𝖽𝖾𝖻𝗂𝗍𝖾𝖽" -> "debited" and "𝖴𝖯𝖨" -> "UPI"
-            // NFKC form is built exactly for this compatibility!
+            // Normalize text
             val cleanBody = Normalizer.normalize(rawBody, Normalizer.Form.NFKC)
 
-            Log.d("SmsReceiver", "Original: $rawBody")
-            Log.d("SmsReceiver", "Cleaned:  $cleanBody")
-
-            // --- FILTERING ---
-            // For the hackathon, we REMOVED the bank sender check completely.
-            // It will now accept SMS from ANY number (including your friends/test phone).
-
-            // --- PARSING ---
-            val transaction = parseSms(cleanBody)
+            // Parse
+            val transaction = parseSms(cleanBody, sender)
 
             if (transaction != null) {
-                Log.d("SmsReceiver", "✅ Parsed: ${transaction.type} ₹${transaction.amount}")
+                Log.d("SmsReceiver", "✅ Verified Transaction: ${transaction.counterparty} ₹${transaction.amount}")
 
                 val dao = MunshiDatabase.getDatabase(context).transactionDao()
                 CoroutineScope(Dispatchers.IO).launch {
+                    // Ideally, check if transactionHash exists before inserting
+                    // But for MVP, Room will just add it.
                     dao.insertTransaction(transaction)
                 }
-            } else {
-                Log.d("SmsReceiver", "❌ Failed to parse. Text was cleaned but no keywords found.")
             }
         }
     }
 
-    private fun parseSms(body: String): Transaction? {
+    private fun parseSms(body: String, sender: String): Transaction? {
         try {
-            // Work with the cleaned, normalized text
             val lowerBody = body.toLowerCase()
             var type: String = "UNKNOWN"
 
-            // --- LOGIC FOR "DEBITED" vs "CREDITED" ---
-            // We check positions to handle messages like "Debited 11.00... Bal... credited (spam text)"
-
+            // Logic for Income vs Expense
             val debitIndex = listOf("debited", "spent", "paid", "sent", "withdrawal", "purchase").minOfOrNull {
                 val idx = lowerBody.indexOf(it)
                 if (idx == -1) Int.MAX_VALUE else idx
@@ -73,22 +61,26 @@ class SmsReceiver : BroadcastReceiver() {
                 if (idx == -1) Int.MAX_VALUE else idx
             } ?: Int.MAX_VALUE
 
-            if (debitIndex == Int.MAX_VALUE && creditIndex == Int.MAX_VALUE) {
-                return null // Neither found
-            }
+            if (debitIndex == Int.MAX_VALUE && creditIndex == Int.MAX_VALUE) return null
 
-            // Whichever keyword appears FIRST determines the type
             type = if (debitIndex < creditIndex) "EXPENSE" else "INCOME"
 
-            // --- EXTRACT AMOUNT ---
-            val match = amountRegex.find(body) // Use 'body' (case sensitive) or 'lowerBody' doesn't matter for numbers
-
+            // Extract Amount
+            val match = amountRegex.find(body)
             val amountString = match?.groups?.get(1)?.value?.replace(",", "")
             val amount = amountString?.toDoubleOrNull()
 
-            if (amount == null || amount == 0.0) {
-                return null
-            }
+            if (amount == null || amount == 0.0) return null
+
+            // --- NEW FIELDS GENERATION ---
+
+            // 1. Counterparty: Use the Sender ID (e.g. VM-HDFCBK)
+            // In a real app, we would Regex extract "to Zomato" from the body.
+            val counterpartyName = sender
+
+            // 2. Unique Hash: Combine body + amount to create a fingerprint
+            // This helps prevent adding the same SMS twice if the receiver triggers multiple times.
+            val uniqueHash = (body + amount.toString()).hashCode().toString()
 
             return Transaction(
                 amount = amount,
@@ -96,7 +88,11 @@ class SmsReceiver : BroadcastReceiver() {
                 date = System.currentTimeMillis(),
                 category = "SMS / Uncategorized",
                 note = body.take(60),
-                source = "SMS"
+                source = "SMS",
+                // Set new fields
+                counterparty = counterpartyName,
+                isVerified = true, // High Trust!
+                transactionHash = uniqueHash
             )
         } catch (e: Exception) {
             Log.e("SmsReceiver", "Error parsing SMS", e)
