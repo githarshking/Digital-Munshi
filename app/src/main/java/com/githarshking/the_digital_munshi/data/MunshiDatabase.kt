@@ -5,7 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [Transaction::class], version = 2, exportSchema = false) // Version bumped to 2
+// UPDATED: Version is now 3
+@Database(entities = [Transaction::class], version = 3, exportSchema = false)
 abstract class MunshiDatabase : RoomDatabase() {
 
     abstract fun transactionDao(): TransactionDao
@@ -21,9 +22,7 @@ abstract class MunshiDatabase : RoomDatabase() {
                     MunshiDatabase::class.java,
                     "munshi_database"
                 )
-                    // This line is CRITICAL for development.
-                    // It allows the app to delete the old database if the schema changes,
-                    // preventing a crash on startup.
+                    // This deletes the old DB if the version changes (Data loss is expected in Dev)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

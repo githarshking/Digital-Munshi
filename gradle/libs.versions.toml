@@ -16,6 +16,9 @@ accompanist = "0.34.0"
 navigation = "2.7.7"
 materialIconsExtended = "1.6.7"
 zxing = "3.5.3"
+generativeai = "0.9.0"
+work = "2.9.0"
+
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,6 +43,8 @@ accompanist-permissions = { group = "com.google.accompanist", name = "accompanis
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+google-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

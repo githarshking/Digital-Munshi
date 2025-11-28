@@ -4,27 +4,24 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object (DAO) for the Transaction entity.
- * This is where we define our database queries.
- */
 @Dao
 interface TransactionDao {
 
-    // 'suspend' means this function can be paused and resumed,
-    // so it doesn't block the main UI thread.
+    // CHANGED: Returns Long (The Row ID)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTransaction(transaction: Transaction)
+    suspend fun insertTransaction(transaction: Transaction): Long
 
-    // A "Flow" is a modern Kotlin way to observe data changes.
-    // Room will automatically update this list whenever the data changes.
-    // This is powerful!
+    @Update
+    suspend fun updateTransaction(transaction: Transaction)
+
+    @Query("SELECT * FROM transactions_table WHERE id = :id LIMIT 1")
+    suspend fun getTransactionById(id: Long): Transaction?
+
     @Query("SELECT * FROM transactions_table ORDER BY transaction_date DESC")
     fun getAllTransactions(): Flow<List<Transaction>>
 
-    // We'll use this for the report on Day 4
-    @Query("SELECT * FROM transactions_table WHERE transaction_date BETWEEN :startDate AND :endDate")
-    fun getTransactionsBetweenDates(startDate: Long, endDate: Long): Flow<List<Transaction>>
+    // ... other methods ...
 }

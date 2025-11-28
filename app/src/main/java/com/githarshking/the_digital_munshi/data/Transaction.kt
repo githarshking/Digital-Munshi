@@ -13,7 +13,7 @@ data class Transaction(
     val amount: Double,
 
     @ColumnInfo(name = "transaction_type")
-    val type: String,     // "INCOME" or "EXPENSE"
+    val type: String,
 
     @ColumnInfo(name = "transaction_date")
     val date: Long,
@@ -25,15 +25,24 @@ data class Transaction(
     val note: String?,
 
     @ColumnInfo(name = "transaction_source")
-    val source: String,    // "MANUAL", "SMS"
-
+    val source: String,
 
     @ColumnInfo(name = "counterparty")
-    val counterparty: String = "Unknown", // Who paid you? (e.g., "Zomato", "Client Name")
+    val counterparty: String = "Unknown",
 
     @ColumnInfo(name = "is_verified")
-    val isVerified: Boolean = false,      // True if from SMS, False if Manual
+    val isVerified: Boolean = false,
 
     @ColumnInfo(name = "transaction_hash")
-    val transactionHash: String = ""      // Unique ID to prevent duplicate SMS
+    val transactionHash: String = "",
+
+    // --- NEW AI FIELDS ---
+    @ColumnInfo(name = "ai_category")
+    val aiCategory: String? = null,
+
+    @ColumnInfo(name = "ai_confidence")
+    val aiConfidence: Double = 0.0,
+
+    @ColumnInfo(name = "ai_reasoning")
+    val aiReasoning: String? = null
 )
