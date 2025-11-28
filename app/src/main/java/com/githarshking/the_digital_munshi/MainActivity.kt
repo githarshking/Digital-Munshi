@@ -5,11 +5,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,12 +32,12 @@ import com.githarshking.the_digital_munshi.data.*
 import com.githarshking.the_digital_munshi.ui.ReportScreen
 import com.githarshking.the_digital_munshi.ui.theme.DigitalMunshiTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberMultiplePermissionsState // CHANGED IMPORT
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.UUID
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,7 +53,6 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MunshiApp() {
-    // --- FIX: Request BOTH permissions ---
     val permissionsState = rememberMultiplePermissionsState(
         permissions = listOf(
             Manifest.permission.READ_SMS,
@@ -59,7 +60,6 @@ fun MunshiApp() {
         )
     )
 
-    // Check if all permissions are granted
     if (permissionsState.allPermissionsGranted) {
         AppNavigation()
     } else {
@@ -70,10 +70,6 @@ fun MunshiApp() {
         )
     }
 }
-
-// ... The rest of the file (AppNavigation, MainAppScreen, etc.) is IDENTICAL to Day 4 ...
-// ... Paste the rest of your MainActivity.kt code here ...
-// To save space, I am including the PermissionRequestScreen and Navigation below:
 
 @Composable
 fun AppNavigation() {
@@ -108,11 +104,6 @@ fun PermissionRequestScreen(onRequestPermission: () -> Unit) {
     }
 }
 
-// ... Copy MainAppScreen, HomeScreenBody, TransactionItem, AddTransactionDialog from your previous code ...
-// ... They do not need changes, only the MunshiApp() function changed ...
-// ... Just ensure you have the full file content ...
-
-// For completeness, here is the MainAppScreen start so you know where to paste the rest
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
@@ -188,6 +179,11 @@ fun HomeScreenBody(modifier: Modifier = Modifier, transactions: List<Transaction
 
 @Composable
 fun TransactionItem(transaction: Transaction, onClick: () -> Unit) {
+    // Format date for list item
+    val dateStr = remember(transaction.date) {
+        SimpleDateFormat("dd MMM", Locale.US).format(Date(transaction.date))
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -205,7 +201,7 @@ fun TransactionItem(transaction: Transaction, onClick: () -> Unit) {
                         Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Verified", tint = Color(0xFF2196F3), modifier = Modifier.size(16.dp))
                     }
                 }
-                Text(text = transaction.note ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Text(text = "$dateStr • ${transaction.note ?: ""}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 Text(text = "From: ${transaction.counterparty}", style = MaterialTheme.typography.bodySmall, color = Color.Black)
             }
             Text(
@@ -232,16 +228,56 @@ fun AddTransactionDialog(
     var isExpense by remember { mutableStateOf(transactionToEdit?.type == "EXPENSE" || transactionToEdit == null) }
     var selectedCategory by remember { mutableStateOf(transactionToEdit?.category ?: "Groceries") }
 
-    val categories = listOf("Groceries", "Fuel", "Salary", "Sales", "Rent", "Other", "SMS / Uncategorized")
+    // --- DATE PICKER LOGIC ---
+    var selectedDateMillis by remember { mutableStateOf(transactionToEdit?.date ?: System.currentTimeMillis()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val dateState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedDateMillis = dateState.selectedDateMillis ?: System.currentTimeMillis()
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = dateState)
+        }
+    }
+    // -------------------------
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (transactionToEdit == null) "Add Transaction" else "Edit Transaction") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // DATE SELECTION FIELD
+                OutlinedTextField(
+                    value = SimpleDateFormat("dd MMM yyyy", Locale.US).format(Date(selectedDateMillis)),
+                    onValueChange = {},
+                    label = { Text("Date") },
+                    readOnly = true, // User must click icon to change
+                    trailingIcon = {
+                        IconButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = "Select Date")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showDatePicker = true }
+                )
+
                 OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount (₹)") })
                 OutlinedTextField(value = counterparty, onValueChange = { counterparty = it }, label = { Text("Paid To / Received From") })
                 OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("Note (Optional)") })
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = isExpense, onClick = { isExpense = true })
                     Text("Expense", modifier = Modifier.padding(end = 16.dp))
@@ -257,7 +293,8 @@ fun AddTransactionDialog(
                     id = transactionToEdit?.id ?: 0L,
                     amount = amount.toDoubleOrNull() ?: 0.0,
                     type = if (isExpense) "EXPENSE" else "INCOME",
-                    date = transactionToEdit?.date ?: System.currentTimeMillis(),
+                    // USE THE SELECTED DATE
+                    date = selectedDateMillis,
                     category = selectedCategory.ifEmpty { "Other" },
                     note = note,
                     source = transactionToEdit?.source ?: "MANUAL",

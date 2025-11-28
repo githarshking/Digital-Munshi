@@ -4,15 +4,16 @@ import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,24 +46,45 @@ fun ReportScreen(
 ) {
     val riskProfile by viewModel.riskProfile.collectAsState()
     val signedReport by viewModel.signedReport.collectAsState()
+    val availableMonths by viewModel.availableMonths.collectAsState()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
 
-    // Mock User ID
+    var showMonthDropdown by remember { mutableStateOf(false) }
     val userId = remember { "USR-${UUID.randomUUID().toString().take(8).uppercase()}" }
-
-    // State for QR Dialog
     var showQrDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Kamayi Patra", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { showMonthDropdown = true }) {
+                        Text(selectedMonth ?: "Risk Assessment (All Time)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Filter", tint = Color.White)
+                    }
+
+                    // Dropdown for Filtering
+                    DropdownMenu(
+                        expanded = showMonthDropdown,
+                        onDismissRequest = { showMonthDropdown = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("All Time (Risk View)") },
+                            onClick = { viewModel.setMonthFilter(null); showMonthDropdown = false }
+                        )
+                        availableMonths.forEach { month ->
+                            DropdownMenuItem(
+                                text = { Text(month) },
+                                onClick = { viewModel.setMonthFilter(month); showMonthDropdown = false }
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    // ONLY Show Share button if the report is Signed
                     if (signedReport.isSigned) {
                         IconButton(onClick = { showQrDialog = true }) {
                             Icon(Icons.Default.QrCode, contentDescription = "Share Report")
@@ -73,7 +95,7 @@ fun ReportScreen(
                     containerColor = Color(0xFF1A237E),
                     titleContentColor = Color.White,
                     navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White // White Share Icon
+                    actionIconContentColor = Color.White
                 )
             )
         }
@@ -87,15 +109,13 @@ fun ReportScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
 
-            // --- HEADER ZONE ---
+            // --- HEADER ---
             item {
                 Column(Modifier.fillMaxWidth()) {
                     Text("GENERATED FOR", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Text(userId, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
-                    if (signedReport.isSigned) {
-                        Text("REPORT ID: ${signedReport.signature.take(16)}...", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
-                    } else {
-                        Text("STATUS: DRAFT (Unsigned)", style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF6C00))
+                    if (selectedMonth != null) {
+                        Text("FILTER: $selectedMonth", style = MaterialTheme.typography.labelSmall, color = Color(0xFF1A237E))
                     }
                 }
             }
@@ -105,9 +125,9 @@ fun ReportScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     KpiCard(
                         modifier = Modifier.weight(1f),
-                        title = "STABILITY SCORE",
+                        title = if(selectedMonth == null) "STABILITY SCORE" else "MONTHLY STATUS",
                         value = riskProfile.stabilityLabel,
-                        subtext = "CV Score: ${"%.1f".format(riskProfile.stabilityScore)}%",
+                        subtext = if(selectedMonth == null) "CV Score: ${"%.1f".format(riskProfile.stabilityScore)}%" else "For this month",
                         isGood = riskProfile.stabilityScore < 20 || riskProfile.stabilityLabel.contains("Collecting")
                     )
                     KpiCard(
@@ -124,7 +144,7 @@ fun ReportScreen(
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Seasonality Waveform", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text("Seasonality Waveform (History)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(16.dp))
                         if (riskProfile.monthlyTrend.isNotEmpty()) {
                             SeasonalityChart(data = riskProfile.monthlyTrend, modifier = Modifier.fillMaxWidth().height(150.dp))
@@ -137,11 +157,22 @@ fun ReportScreen(
                 }
             }
 
+            // --- TOTALS ROW ---
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column { Text("INCOME", style = MaterialTheme.typography.labelSmall); Text("₹${riskProfile.totalIncome.toInt()}", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32)) }
+                        Column { Text("EXPENSE", style = MaterialTheme.typography.labelSmall); Text("₹${riskProfile.totalExpense.toInt()}", fontWeight = FontWeight.Bold, color = Color(0xFFC62828)) }
+                        Column { Text("SAVINGS", style = MaterialTheme.typography.labelSmall); Text("₹${riskProfile.netSavings.toInt()}", fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+
             // --- ZONE C: ECOSYSTEM ---
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Revenue Sources", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text(if(selectedMonth == null) "Revenue Sources (All Time)" else "Revenue Sources ($selectedMonth)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(12.dp))
                         if (riskProfile.topSources.isEmpty()) {
                             Text("No verified sources.", style = MaterialTheme.typography.bodySmall)
@@ -170,7 +201,6 @@ fun ReportScreen(
             item { Spacer(Modifier.height(30.dp)) }
         }
 
-        // --- QR CODE DIALOG ---
         if (showQrDialog) {
             QrShareDialog(
                 userId = userId,
@@ -182,72 +212,15 @@ fun ReportScreen(
     }
 }
 
-@Composable
-fun QrShareDialog(
-    userId: String,
-    riskProfile: com.githarshking.the_digital_munshi.data.RiskProfile,
-    signedReport: com.githarshking.the_digital_munshi.data.SignedReport,
-    onDismiss: () -> Unit
-) {
-    // Generate the Payload String
-    val payload = remember {
-        QrCodeUtils.createSharePayload(
-            userId = userId,
-            income = riskProfile.totalIncome,
-            score = riskProfile.stabilityScore,
-            signature = signedReport.signature,
-            publicKey = signedReport.publicKey
-        )
-    }
-
-    // Generate the Bitmap
-    val qrBitmap = remember(payload) {
-        QrCodeUtils.generateQrCode(payload)
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("Lender Scan Code", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-                Text("Show this code to the loan officer to instantly verify your data.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, color = Color.Gray)
-
-                Spacer(Modifier.height(24.dp))
-
-                if (qrBitmap != null) {
-                    Image(
-                        bitmap = qrBitmap,
-                        contentDescription = "QR Code",
-                        modifier = Modifier.size(200.dp),
-                        contentScale = ContentScale.Fit
-                    )
-                } else {
-                    Text("Error generating QR", color = Color.Red)
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E))) {
-                    Text("Close")
-                }
-            }
-        }
-    }
-}
-
-// --- HELPERS (KpiCard, SeasonalityChart, etc. kept same as previous step) ---
+// ... (Include the rest of the helper functions: KpiCard, SeasonalityChart, EcosystemRow, CertificationSection, DigitalSealCard, QrShareDialog) ...
+// They remain exactly as they were in the previous step. Copy them here.
+// IMPORTANT: Re-paste the helper functions from the previous "Step 3: Update ReportScreen.kt" block
+// to ensure the file is complete.
 
 @Composable
 fun KpiCard(modifier: Modifier, title: String, value: String, subtext: String, isGood: Boolean) {
     val color = if (isGood) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
     val textColor = if (isGood) Color(0xFF2E7D32) else Color(0xFFC62828)
-
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = color), elevation = CardDefaults.cardElevation(0.dp)) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
@@ -263,13 +236,11 @@ fun KpiCard(modifier: Modifier, title: String, value: String, subtext: String, i
 fun SeasonalityChart(data: List<Pair<String, Float>>, modifier: Modifier = Modifier) {
     val points = data.map { it.second }
     val max = points.maxOrNull() ?: 1f
-
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height
         val stepX = width / (points.size.coerceAtLeast(1))
         val path = Path()
-
         points.forEachIndexed { index, value ->
             val x = index * stepX + (stepX / 2)
             val y = height - ((value / max) * height)
@@ -329,6 +300,41 @@ fun DigitalSealCard(signature: String) {
             Spacer(Modifier.height(8.dp))
             Text(signature.take(20) + "...", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
             Text("Tamper-proof record.", style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+        }
+    }
+}
+
+@Composable
+fun QrShareDialog(
+    userId: String,
+    riskProfile: com.githarshking.the_digital_munshi.data.RiskProfile,
+    signedReport: com.githarshking.the_digital_munshi.data.SignedReport,
+    onDismiss: () -> Unit
+) {
+    val payload = remember {
+        QrCodeUtils.createSharePayload(
+            userId = userId,
+            income = riskProfile.totalIncome,
+            score = riskProfile.stabilityScore,
+            signature = signedReport.signature,
+            publicKey = signedReport.publicKey
+        )
+    }
+    val qrBitmap = remember(payload) { QrCodeUtils.generateQrCode(payload) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Lender Scan Code", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("Show this code to the loan officer to instantly verify your data.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, color = Color.Gray)
+                Spacer(Modifier.height(24.dp))
+                if (qrBitmap != null) {
+                    Image(bitmap = qrBitmap, contentDescription = "QR Code", modifier = Modifier.size(200.dp), contentScale = ContentScale.Fit)
+                } else { Text("Error generating QR", color = Color.Red) }
+                Spacer(Modifier.height(24.dp))
+                Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E))) { Text("Close") }
+            }
         }
     }
 }
