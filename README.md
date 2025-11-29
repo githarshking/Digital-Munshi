@@ -51,6 +51,7 @@ Uses a **De-coupled Asynchronous Pipeline**:
 Input: "Paid Rs 500 to Shell" + Context: "Driver"
 Output: Category: "Business Inventory" (Fuel), Confidence: 98%
 Explainability: "Identified Shell as a fuel station relevant to driving job
+```
 
 ### Module C: The "Risk Engine" (Analytics)
 Located in `ReportViewModel`, this transforms raw rows into Bank-Grade Metrics.
@@ -113,12 +114,15 @@ com.githarshking.the_digital_munshi
 ├── MainActivity.kt            // Navigation & Entry Point
 └── SmsReceiver.kt             // Broadcast Receiver (The Ear)
 
+```
+
 
 ## 🚀 Getting Started
 
 1. **Clone the repository**
    ```bash
    git clone [https://github.com/yourusername/digital-munshi.git](https://github.com/yourusername/digital-munshi.git)
+   ```
 
 2. **Add API Key**
    * Get your API key from [Google AI Studio](https://aistudio.google.com/).
