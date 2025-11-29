@@ -2,7 +2,6 @@ package com.githarshking.the_digital_munshi.data
 
 import android.content.Context
 import android.os.Build
-import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -35,16 +34,20 @@ data class RiskProfile(
     val verifiedRatio: Int = 0,
     val profitMargin: Int = 0,
     val monthlyTrend: List<Pair<String, Float>> = emptyList(),
-    val topSources: List<Pair<String, Double>> = emptyList()
+    val topSources: List<Pair<String, Double>> = emptyList(),
+
+    // --- NEW: LOAN UNDERWRITING FIELDS ---
+    val loanEligibility: Int = 0,
+    val monthlySurplus: Double = 0.0
 )
 
 data class SignedReport(
     val signature: String = "",
     val publicKey: String = "",
-    val payloadJson: String = "", // Store the full JSON here
+    val payloadJson: String = "",
     val timestamp: Long = 0L,
     val isSigned: Boolean = false,
-    val error: String? = null // New Error Field
+    val error: String? = null
 )
 
 class ReportViewModel(dao: TransactionDao) : ViewModel() {
@@ -70,35 +73,25 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
     private val _signedReport = MutableStateFlow(SignedReport())
     val signedReport = _signedReport.asStateFlow()
 
-    /**
-     * Generates the Section 65B Compliant, Bank-Grade QR Payload.
-     * Now requires Context to fetch Real Identity.
-     */
     fun generateLegalSignature(context: Context) {
         viewModelScope.launch {
             try {
-                // 1. FIX RACE CONDITION: Get the latest calculation explicitly
                 val profile = riskProfile.first()
 
-                // 2. SAFETY CHECK: Prevent "Ghost User" reports
                 if (profile.totalIncome <= 0) {
                     _signedReport.value = SignedReport(error = "Insufficient Data: Cannot certify a report with zero income.")
                     return@launch
                 }
 
-                // 3. FETCH IDENTITY: Get real name from preferences
                 val (name, occupation, _) = UserPreferences.getUserDetails(context)
                 val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
 
-                // 4. CREATE PAYLOAD: Generate the strict JSON Structure
-                // We sign a simplified string for the signature, but distribute the full JSON
-                val signaturePayload = "ID:$name|INC:${profile.totalIncome}|CV:${profile.stabilityScore}|TS:${System.currentTimeMillis()}"
+                val signaturePayload = "ID:$name|LOAN:${profile.loanEligibility}|CV:${profile.stabilityScore}|TS:${System.currentTimeMillis()}"
 
-                // 5. SIGN: Hardware backed signature
                 val signature = SecurityUtils.signData(signaturePayload)
                 val pubKey = SecurityUtils.getPublicKey()
 
-                // 6. COMPILE: Create the final QR JSON
+                // UPDATED: Now passing loanEligibility to the JSON generator
                 val finalJson = QrCodeUtils.createCreditProfileJson(
                     userName = name,
                     userOccupation = occupation,
@@ -108,15 +101,15 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
                     stabilityScore = profile.stabilityScore,
                     stabilityLabel = profile.stabilityLabel,
                     profitMargin = profile.profitMargin,
+                    loanEligibility = profile.loanEligibility, // Pass the new value
                     signature = signature,
                     publicKey = pubKey
                 )
 
-                // 7. UPDATE STATE
                 _signedReport.value = SignedReport(
                     signature = signature,
                     publicKey = pubKey,
-                    payloadJson = finalJson, // Store this for the QR generator
+                    payloadJson = finalJson,
                     timestamp = System.currentTimeMillis(),
                     isSigned = true,
                     error = null
@@ -133,7 +126,6 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
         _signedReport.value = _signedReport.value.copy(error = null)
     }
 
-    // ... calculateRiskMetrics logic remains identical to previous step ...
     private fun calculateRiskMetrics(allTxns: List<Transaction>, monthFilter: String?): RiskProfile {
         if (allTxns.isEmpty()) return RiskProfile()
 
@@ -153,6 +145,7 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
         val verifiedIncome = incomeList.filter { it.isVerified }.sumOf { it.amount }
         val verifiedRatio = if (totalIncome > 0) ((verifiedIncome / totalIncome) * 100).toInt() else 0
 
+        // Calculate Stability (All Time)
         val allIncomeList = allTxns.filter { it.type == "INCOME" }
         val monthlyIncomeMap = allIncomeList
             .groupBy { fmt.format(Date(it.date)) }
@@ -168,6 +161,9 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
         var label = "Insufficient Data"
         var peaks = emptyList<String>()
 
+        // Default Loan logic (Fallback)
+        var estimatedLoanLimit = 0
+
         if (monthlyIncomes.isNotEmpty()) {
             val mean = monthlyIncomes.average()
             val variance = monthlyIncomes.map { (it - mean).pow(2) }.average()
@@ -181,6 +177,34 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
                 else -> "Volatile"
             }
             peaks = monthlyIncomeMap.filter { it.value > (mean * 1.5) }.keys.toList()
+
+            // --- LOAN ELIGIBILITY ALGORITHM ---
+            val monthCount = monthlyIncomes.size.coerceAtLeast(1)
+
+            // 1. Calculate Average Monthly Surplus (Total Savings / Months Active)
+            // Note: We use 'netSavings' (filtered) if filter is active, or total net savings if not.
+            // For underwriting, it's safer to use the 'Mean Average' of surplus if possible,
+            // but for MVP we will use (Total Income - Total Expense) / Months.
+            val totalAllTimeSavings = allTxns.filter { it.type == "INCOME" }.sumOf { it.amount } -
+                    allTxns.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+
+            val avgMonthlySurplus = if(totalAllTimeSavings > 0) totalAllTimeSavings / monthCount else 0.0
+
+            // 2. Safe EMI Capacity (50% of Surplus)
+            val safeEmi = avgMonthlySurplus * 0.50
+
+            // 3. Base Loan (12 Months Tenure)
+            val baseLoan = safeEmi * 12
+
+            // 4. Risk Adjustment based on CV (Stability)
+            val riskFactor = when {
+                monthlyIncomes.size < 2 -> 0.0 // Too new
+                cv < 20.0 -> 1.0  // 100% of Base
+                cv < 50.0 -> 0.75 // 75% of Base
+                else -> 0.0       // Too volatile
+            }
+
+            estimatedLoanLimit = (baseLoan * riskFactor).toInt()
         }
 
         val topSources = incomeList
@@ -200,7 +224,10 @@ class ReportViewModel(dao: TransactionDao) : ViewModel() {
             verifiedRatio = verifiedRatio,
             profitMargin = profitMargin,
             monthlyTrend = chartData,
-            topSources = topSources
+            topSources = topSources,
+            // New Fields
+            loanEligibility = estimatedLoanLimit,
+            monthlySurplus = if (monthlyIncomes.isNotEmpty()) netSavings / monthlyIncomes.size else 0.0
         )
     }
 }

@@ -12,9 +12,6 @@ import org.json.JSONObject
 
 object QrCodeUtils {
 
-    /**
-     * Generates a QR Code ImageBitmap from a String.
-     */
     fun generateQrCode(content: String, size: Int = 512): ImageBitmap? {
         return try {
             val hints = hashMapOf<EncodeHintType, Any>()
@@ -39,9 +36,6 @@ object QrCodeUtils {
         }
     }
 
-    /**
-     * Creates the "Bank-Grade" JSON Payload (Schema 2.0)
-     */
     fun createCreditProfileJson(
         userName: String,
         userOccupation: String,
@@ -51,15 +45,15 @@ object QrCodeUtils {
         stabilityScore: Double,
         stabilityLabel: String,
         profitMargin: Int,
+        // New Field
+        loanEligibility: Int,
         signature: String,
         publicKey: String
     ): String {
-        // Mask the name slightly for privacy in the QR (Optional, but good practice)
-        // For the hackathon, we show full name to prove identity.
         val identity = "$userName ($userOccupation)"
 
         val root = JSONObject()
-        root.put("ver", "2.0")
+        root.put("ver", "2.1") // Version Bump
         root.put("uid", identity)
 
         val meta = JSONObject()
@@ -75,6 +69,10 @@ object QrCodeUtils {
         financials.put("profit_margin_percent", profitMargin)
         financials.put("stability_score", stabilityScore)
         financials.put("stability_band", stabilityLabel)
+
+        // The Underwriting Field
+        financials.put("max_loan_eligibility", loanEligibility)
+
         root.put("financials", financials)
 
         val security = JSONObject()

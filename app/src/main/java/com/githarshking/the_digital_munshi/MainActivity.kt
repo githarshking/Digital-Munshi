@@ -3,8 +3,11 @@ package com.githarshking.the_digital_munshi
 import android.Manifest
 import android.content.Context
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +39,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.githarshking.the_digital_munshi.data.*
 import com.githarshking.the_digital_munshi.ui.OnboardingScreen
 import com.githarshking.the_digital_munshi.ui.ReportScreen
@@ -62,15 +69,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MunshiApp() {
     val context = LocalContext.current
-
-    // 1. CHECK ONBOARDING STATUS
     var isOnboarded by remember { mutableStateOf(UserPreferences.isOnboarded(context)) }
 
     if (!isOnboarded) {
-        // 2. SHOW ONBOARDING
         OnboardingScreen(context = context, onFinished = { isOnboarded = true })
     } else {
-        // 3. SHOW MAIN APP (If permissions granted)
         val permissionsState = rememberMultiplePermissionsState(
             permissions = listOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
         )
@@ -122,8 +125,19 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
     var showSmartDialog by remember { mutableStateOf(false) }
     var selectedSmartTransaction by remember { mutableStateOf<Transaction?>(null) }
 
-    // NEW: Profile Dialog State
     var showProfileDialog by remember { mutableStateOf(false) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        uri?.let {
+            Toast.makeText(context, "Reading Statement... Check back in 10s", Toast.LENGTH_LONG).show()
+            val workRequest = OneTimeWorkRequestBuilder<ImportWorker>()
+                .setInputData(workDataOf("FILE_URI" to it.toString()))
+                .build()
+            WorkManager.getInstance(context).enqueue(workRequest)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -135,16 +149,20 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
                     actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 actions = {
-                    // 1. PROFILE ICON (Left of Dashboard)
+                    IconButton(onClick = { launcher.launch("application/pdf") }) {
+                        Icon(
+                            imageVector = Icons.Default.UploadFile,
+                            contentDescription = "Import PDF",
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                     IconButton(onClick = { showProfileDialog = true }) {
                         Icon(
                             imageVector = Icons.Default.AccountCircle,
                             contentDescription = "My Profile",
-                            modifier = Modifier.size(30.dp) // Nice readable size
+                            modifier = Modifier.size(30.dp)
                         )
                     }
-
-                    // 2. DASHBOARD ICON (Increased Size)
                     IconButton(
                         onClick = onNavigateToReport,
                         modifier = Modifier.padding(start = 4.dp, end = 8.dp)
@@ -152,7 +170,7 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
                         Icon(
                             imageVector = Icons.Default.Assessment,
                             contentDescription = "View Report",
-                            modifier = Modifier.size(36.dp) // BIGGER SIZE (Easy to tap)
+                            modifier = Modifier.size(36.dp)
                         )
                     }
                 }
@@ -168,7 +186,6 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
         }
     ) { innerPadding ->
 
-        // --- MAIN LIST ---
         HomeScreenBody(
             modifier = Modifier.padding(innerPadding),
             transactions = transactions,
@@ -182,8 +199,6 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
                 }
             }
         )
-
-        // --- DIALOGS ---
 
         if (showAddDialog) {
             AddTransactionDialog(
@@ -208,7 +223,6 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
             )
         }
 
-        // NEW: Profile Edit Dialog
         if (showProfileDialog) {
             ProfileEditDialog(
                 context = context,
@@ -220,9 +234,7 @@ fun MainAppScreen(dao: TransactionDao, onNavigateToReport: () -> Unit) {
 
 @Composable
 fun ProfileEditDialog(context: Context, onDismiss: () -> Unit) {
-    // Load existing user details to pre-fill the form
     val (currentName, currentOcc, currentDesc) = remember { UserPreferences.getUserDetails(context) }
-
     var name by remember { mutableStateOf(currentName) }
     var occupation by remember { mutableStateOf(currentOcc) }
     var description by remember { mutableStateOf(currentDesc) }
@@ -234,42 +246,23 @@ fun ProfileEditDialog(context: Context, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Updating your profile helps the AI categorize your transactions better.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text("Name") }, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = occupation, onValueChange = { occupation = it },
-                    label = { Text("Occupation") }, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = description, onValueChange = { description = it },
-                    label = { Text("Work Context (for AI)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = occupation, onValueChange = { occupation = it }, label = { Text("Occupation") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Work Context (for AI)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             }
         },
         confirmButton = {
             Button(onClick = {
                 UserPreferences.saveUser(context, name, occupation, description)
                 onDismiss()
-            }) {
-                Text("Save Profile")
-            }
+            }) { Text("Save Profile") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
 
 @Composable
-fun SmartTransactionDialog(
-    transaction: Transaction,
-    onDismiss: () -> Unit,
-    onEditManually: () -> Unit
-) {
+fun SmartTransactionDialog(transaction: Transaction, onDismiss: () -> Unit, onEditManually: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF673AB7)) },
@@ -277,12 +270,7 @@ fun SmartTransactionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("I categorized this as:", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    transaction.category.uppercase(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Text(transaction.category.uppercase(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
                 Divider()
                 Row(verticalAlignment = Alignment.Top) {
                     Icon(Icons.Default.Lightbulb, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
@@ -295,11 +283,7 @@ fun SmartTransactionDialog(
                         Text("${(transaction.aiConfidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        progress = transaction.aiConfidence.toFloat(),
-                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                        color = if(transaction.aiConfidence > 0.8) Color(0xFF4CAF50) else Color(0xFFFF9800)
-                    )
+                    LinearProgressIndicator(progress = transaction.aiConfidence.toFloat(), modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), color = if(transaction.aiConfidence > 0.8) Color(0xFF4CAF50) else Color(0xFFFF9800))
                 }
             }
         },
@@ -424,6 +408,8 @@ fun DefaultPreview() {
                 override suspend fun updateTransaction(transaction: Transaction) {}
                 override suspend fun getTransactionById(id: Long) = null
                 override fun getAllTransactions() = kotlinx.coroutines.flow.flowOf(emptyList<Transaction>())
+                override fun getTransactionsBetweenDates(startDate: Long, endDate: Long) = kotlinx.coroutines.flow.flowOf(emptyList<Transaction>())
+                override suspend fun checkDuplicate(amount: Double, date: Long, type: String) = 0
             },
             onNavigateToReport = {}
         )

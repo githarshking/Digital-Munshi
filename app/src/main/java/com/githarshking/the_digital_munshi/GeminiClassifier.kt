@@ -19,7 +19,7 @@ class GeminiClassifier(private val context: Context) {
 
     private val apiKey = BuildConfig.GEMINI_API_KEY
 
-    // FIX 1: Use the specific version "-001".
+    // FIX 1: Use the specific version "2.5-flash".
     // The alias "gemini-1.5-flash" sometimes fails on older SDKs.
     private val model = GenerativeModel(
         modelName = "gemini-2.5-flash",

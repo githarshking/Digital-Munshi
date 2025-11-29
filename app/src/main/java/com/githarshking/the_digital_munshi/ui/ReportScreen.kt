@@ -41,12 +41,10 @@ import java.util.UUID
 // Define Professional Colors
 val ProfessionalGreen = Color(0xFF2E7D32)
 val ProfessionalRed = Color(0xFFC62828)
-// Specific Stability Colors
-val StabilityGreen = Color(0xFF00C853)  // Bright Green for Excellent
-val StabilityYellow = Color(0xFFFFAB00) // Amber for Good/Average
-val StabilityOrange = Color(0xFFFF6D00) // Orange for Below Average
-val StabilityRed = Color(0xFFD50000)    // Deep Red for Volatile
-
+val StabilityGreen = Color(0xFF00C853)
+val StabilityYellow = Color(0xFFFFAB00)
+val StabilityOrange = Color(0xFFFF6D00)
+val StabilityRed = Color(0xFFD50000)
 val DarkGreyText = Color(0xFF49454F)
 val SurfaceWhite = Color.White
 val DividerColor = Color(0xFFE0E0E0)
@@ -66,7 +64,7 @@ fun ReportScreen(
     val userId = remember { "USR-${UUID.randomUUID().toString().take(8).uppercase()}" }
     var showQrDialog by remember { mutableStateOf(false) }
 
-    val context = LocalContext.current // Need context for Signing
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -123,7 +121,7 @@ fun ReportScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
 
-            // --- HEADER ---
+            // HEADER
             item {
                 Column(Modifier.fillMaxWidth()) {
                     Text("GENERATED FOR", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -134,19 +132,22 @@ fun ReportScreen(
                 }
             }
 
-            // --- ZONE A: KPIs (UPDATED) ---
+            // ZONE A: KPIs
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     val isCollecting = riskProfile.stabilityScore == 0.0 || riskProfile.stabilityLabel.contains("Collecting")
 
-                    // 1. Stability Score Card (With Color Logic)
+                    // NEW: Loan Eligibility Hero Card
+                    LoanEligibilityCard(amount = riskProfile.loanEligibility, isCollecting = isCollecting)
+
+                    // Stability
                     StabilityKpiCard(
                         score = riskProfile.stabilityScore,
                         label = riskProfile.stabilityLabel,
                         isCollecting = isCollecting
                     )
 
-                    // 2. Business Health Card (Split Layout)
+                    // Business Health
                     BusinessHealthKpiCard(
                         profitMargin = riskProfile.profitMargin,
                         expenseRatio = 100 - riskProfile.profitMargin
@@ -154,7 +155,7 @@ fun ReportScreen(
                 }
             }
 
-            // --- ZONE B: CHARTS ---
+            // ZONE B: CHARTS
             item {
                 OutlinedCard(
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -181,7 +182,7 @@ fun ReportScreen(
                 }
             }
 
-            // --- FINANCIAL ROW ---
+            // FINANCIAL ROW
             item {
                 OutlinedCard(
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -195,15 +196,21 @@ fun ReportScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         FinancialColumn("INCOME", "₹${riskProfile.totalIncome.toInt()}", ProfessionalGreen)
-                        VerticalDivider(color = DividerColor, modifier = Modifier.width(1.dp).fillMaxHeight())
+
+                        // Custom Divider to avoid version issues
+                        Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(DividerColor))
+
                         FinancialColumn("EXPENSE", "₹${riskProfile.totalExpense.toInt()}", ProfessionalRed)
-                        VerticalDivider(color = DividerColor, modifier = Modifier.width(1.dp).fillMaxHeight())
+
+                        // Custom Divider
+                        Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(DividerColor))
+
                         FinancialColumn("SAVINGS", "₹${riskProfile.netSavings.toInt()}", Color.Black)
                     }
                 }
             }
 
-            // --- ZONE C: ECOSYSTEM ---
+            // ZONE C: ECOSYSTEM
             item {
                 OutlinedCard(
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
@@ -224,15 +231,12 @@ fun ReportScreen(
                 }
             }
 
-            // --- LEGAL FOOTER ---
+            // LEGAL FOOTER
             item {
                 if (!signedReport.isSigned) {
                     CertificationSection(
                         deviceName = "${Build.MANUFACTURER} ${Build.MODEL}",
-                        onSignClicked = {
-                            // Pass Context for Bank-Grade ID Retrieval
-                            viewModel.generateLegalSignature(context)
-                        }
+                        onSignClicked = { viewModel.generateLegalSignature(context) }
                     )
                 } else {
                     DigitalSealCard(signature = signedReport.signature)
@@ -248,7 +252,6 @@ fun ReportScreen(
         }
 
         if (showQrDialog) {
-            // Pass the FULL JSON payload to the QR generator
             QrShareDialog(
                 qrContent = signedReport.payloadJson,
                 onDismiss = { showQrDialog = false }
@@ -257,19 +260,38 @@ fun ReportScreen(
     }
 }
 
-// --- ALL HELPER COMPOSABLES DEFINED HERE ---
+// --- HELPER COMPOSABLES (MUST BE INCLUDED) ---
+
+@Composable
+fun LoanEligibilityCard(amount: Int, isCollecting: Boolean) {
+    OutlinedCard(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, ProfessionalGreen),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("ESTIMATED LOAN ELIGIBILITY", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = ProfessionalGreen)
+            Spacer(Modifier.height(4.dp))
+            if (isCollecting) {
+                Text("Analyzing...", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.Gray)
+                Text("Add at least 2 months of data.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            } else {
+                Text("₹$amount", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.ExtraBold, color = ProfessionalGreen)
+                Text("Based on monthly surplus & stability.", style = MaterialTheme.typography.bodySmall, color = ProfessionalGreen)
+            }
+        }
+    }
+}
 
 @Composable
 fun StabilityKpiCard(score: Double, label: String, isCollecting: Boolean) {
-    // 4-Color Logic for Stability
     val statusColor = when {
         isCollecting -> Color.Gray
-        score < 10 -> StabilityGreen   // Excellent
-        score < 20 -> StabilityYellow  // Good
-        score < 40 -> StabilityOrange  // Average
-        else -> StabilityRed           // Volatile
+        score < 10 -> StabilityGreen
+        score < 20 -> StabilityYellow
+        score < 40 -> StabilityOrange
+        else -> StabilityRed
     }
-
     val icon = if (isCollecting) Icons.Default.Info else Icons.Default.Verified
 
     OutlinedCard(
@@ -283,23 +305,11 @@ fun StabilityKpiCard(score: Double, label: String, isCollecting: Boolean) {
                 Icon(icon, contentDescription = null, tint = statusColor, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.height(8.dp))
-
             val heroValue = if (isCollecting) "N/A" else "${"%.1f".format(score)}%"
-
-            Text(
-                text = heroValue,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = statusColor
-            )
-            Text(
-                text = if (isCollecting) "Collecting Data..." else label,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.Black
-            )
+            Text(heroValue, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, color = statusColor)
+            Text(if (isCollecting) "Collecting Data..." else label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Color.Black)
             Spacer(Modifier.height(4.dp))
-            Text(if (isCollecting) "Need more transaction history" else "Coefficient of Variation (Lower is better)", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text(if (isCollecting) "Need history" else "Coefficient of Variation", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
     }
 }
@@ -314,16 +324,11 @@ fun BusinessHealthKpiCard(profitMargin: Int, expenseRatio: Int) {
         Column(Modifier.padding(16.dp)) {
             Text("BUSINESS HEALTH", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color.Gray)
             Spacer(Modifier.height(12.dp))
-
-            // Split Layout: Profit Left, Expense Right
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                // Profit Side
                 Column {
                     Text("PROFIT MARGIN", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = ProfessionalGreen)
                     Text("$profitMargin%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = ProfessionalGreen)
                 }
-
-                // Expense Side (Moved here and made bigger)
                 Column(horizontalAlignment = Alignment.End) {
                     Text("EXPENSE RATIO", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = ProfessionalRed)
                     Text("$expenseRatio%", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = ProfessionalRed)
@@ -353,7 +358,6 @@ fun BarChart(data: List<Pair<String, Float>>, modifier: Modifier = Modifier) {
         val barWidth = (chartWidth / points.size) * 0.6f
         val spacing = (chartWidth / points.size) * 0.4f
 
-        // Axes
         drawLine(color = Color.LightGray, start = Offset(0f, chartHeight), end = Offset(chartWidth, chartHeight), strokeWidth = 2.dp.toPx())
         drawLine(color = Color.LightGray, start = Offset(0f, 0f), end = Offset(0f, chartHeight), strokeWidth = 2.dp.toPx())
 
@@ -361,7 +365,6 @@ fun BarChart(data: List<Pair<String, Float>>, modifier: Modifier = Modifier) {
             val x = (index * (barWidth + spacing)) + (spacing / 2)
             val barHeight = (value / max) * chartHeight
             val y = chartHeight - barHeight
-
             drawRect(color = Color(0xFF3F51B5), topLeft = Offset(x, y), size = Size(barWidth, barHeight))
         }
     }
@@ -370,24 +373,15 @@ fun BarChart(data: List<Pair<String, Float>>, modifier: Modifier = Modifier) {
 @Composable
 fun CertificationSection(deviceName: String, onSignClicked: () -> Unit) {
     var isChecked by remember { mutableStateOf(false) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFBC02D))
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9C4)), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFBC02D))) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Legal Certification (Section 65B)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Color.Black)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Top) {
-                Checkbox(checked = isChecked, onCheckedChange = { isChecked = it }, colors = CheckboxDefaults.colors(checkedColor = Color.Black, checkmarkColor = Color.Black))
+                Checkbox(checked = isChecked, onCheckedChange = { isChecked = it }, colors = CheckboxDefaults.colors(checkedColor = Color.Black, checkmarkColor = Color.White))
                 Text("I certify that this report was generated from electronic records residing on my personal device ($deviceName), and is a true representation of my financial transactions.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp), color = Color.Black)
             }
-            Button(
-                onClick = onSignClicked, enabled = isChecked,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E), disabledContainerColor = Color.Gray)
-            ) {
+            Button(onClick = onSignClicked, enabled = isChecked, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A237E), disabledContainerColor = Color.Gray)) {
                 Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Sign & Lock Report")
@@ -427,9 +421,7 @@ fun DigitalSealCard(signature: String) {
 
 @Composable
 fun QrShareDialog(qrContent: String, onDismiss: () -> Unit) {
-    // The content is already JSON, so we generate the QR directly
     val qrBitmap = remember(qrContent) { QrCodeUtils.generateQrCode(qrContent) }
-
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
